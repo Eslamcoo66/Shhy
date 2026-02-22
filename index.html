@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8">
+<title>بطولة الغراقة الرمضانية</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body{font-family:Arial;background:#f0f2f5;padding:20px;direction:rtl;}
+h1,h2,h3,h4{text-align:center;margin:10px;}
+.group{padding:15px;margin-bottom:25px;border-radius:12px;color:#fff;box-shadow:0 4px 10px rgba(0,0,0,0.15);}
+.group.A{background:linear-gradient(45deg,#4a90e2,#357abd);}
+.group.B{background:linear-gradient(45deg,#27ae60,#1e8449);}
+.group.E{background:linear-gradient(45deg,#f39c12,#d68910);}
+.group.F{background:linear-gradient(45deg,#c0392b,#922b21);}
+table{width:100%;border-collapse:collapse;margin-top:10px;background:#fff;color:#000;border-radius:8px;overflow:hidden;}
+th,td{border:1px solid #ddd;padding:8px;text-align:center;}
+button{padding:4px 8px;margin:2px;cursor:pointer;border-radius:6px;border:none;background:#333;color:#fff;}
+input,select{padding:4px;margin-left:4px;}
+.team-editable{cursor:pointer;font-weight:bold;}
+#scorersTable {width:100%;border-collapse:collapse;margin-top:15px;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.2);}
+#scorersTable th{background:linear-gradient(90deg,#f39c12,#f1c40f);color:#fff;padding:12px;font-size:16px;}
+#scorersTable td{padding:10px;text-align:center;border-bottom:1px solid #ddd;font-size:15px;transition:background 0.3s;}
+#scorersTable tbody tr:nth-child(even){background:#f9f9f9;}
+#scorersTable tbody tr:nth-child(odd){background:#fff;}
+#scorersTable tbody tr:hover{background:#ffeaa7;cursor:default;}
+</style>
+</head>
+<body>
+<h1>🏆 بطولة الغراقة الرمضانية</h1>
+<div id="mainPanel"></div>
+
+<div id="topScorers">
+<h2>ترتيب الهدافين</h2>
+<table id="scorersTable">
+<thead><tr><th>اللاعب</th><th>الفريق</th><th>أهداف</th>${/* للماستر */''}<th id="actionsHeader"></th></tr></thead>
+<tbody></tbody>
+</table>
+<div id="addScorerDiv" style="text-align:center;"></div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, onValue, push, set, get, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "gharaqa-ramadan.firebaseapp.com",
+  databaseURL: "https://gharaqa-ramadan-default-rtdb.firebaseio.com",
+  projectId: "gharaqa-ramadan"
+};
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+const MASTER_PASSWORD = "7890";
+
+const defaultGroups = {
+  A:["أصدقاء عبدالوهاب","شباب الشوكة","محلة كيل","أصدقاء حوش عيسي","شباب كوم البوص","الغراقة الغربية"],
+  B:["الشوكة الحاجر","الريف المصري","الصوالحية","اصدقاء محمد فؤاد","الزمالكاوية","البرنوجي"],
+  E:["ممتاز","كوم البوص","نجع العزايم","شباب العساكرة","أنصاف","أصدقاء اسامه الجارحي"],
+  F:["نجوم بطورس","الديابة","كوم القناطر","فلسطين","الحريفة","الغراقة الشرقية"]
+};
+
+let groups = { A:[], B:[], E:[], F:[] };
+let isMaster = false;
+if(location.search.includes("master")){
+  const pw = prompt("ادخل كلمة سر الماستر");
+  if(pw===MASTER_PASSWORD) isMaster = true;
+}
+
+const mainDiv = document.getElementById("mainPanel");
+const addScorerDiv = document.getElementById("addScorerDiv");
+const actionsHeader = document.getElementById("actionsHeader");
+
+// ====== إعداد المجموعات ======
+for(const g of ["A","B","E","F"]){
+  get(ref(db,"teams/"+g)).then(snap=>{
+    if(!snap.exists() || !Array.isArray(snap.val()) || snap.val().length===0){
+      set(ref(db,"teams/"+g), defaultGroups[g]);
+    }
+  });
+}
+
+for(const g of ["A","B","E","F"]){
+  const div = document.createElement("div");
+  div.className = "group "+g;
+
+  let html = `<h3>المجموعة ${g}${isMaster?" (تحكم)":""}</h3>
+  <table id="table-${g}">
+    <thead><tr>
+      <th>الفريق</th><th>لعب</th><th>فوز</th><th>تعادل</th><th>خسارة</th>
+      <th>+</th><th>-</th><th>فارق</th><th>نقاط</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+  <h4>النتائج</h4>
+  <table id="matches-${g}">
+    <thead><tr>
+      <th>فريق</th><th>أهداف</th><th>فريق</th><th>أهداف</th>${isMaster?'<th>تعديل</th><th>حذف</th>':""}
+    </tr></thead>
+    <tbody></tbody>
+  </table>`;
+
+  if(isMaster){
+    html += `
+    <div>
+      <button onclick="addTeam('${g}')">إضافة فريق جديد</button>
+    </div>
+    <div>
+      <select id="t1-${g}"></select>
+      <input type="number" id="s1-${g}" value="0"> -
+      <input type="number" id="s2-${g}" value="0">
+      <select id="t2-${g}"></select>
+      <button onclick="addMatch('${g}')">إضافة نتيجة</button>
+    </div>`;
+  }
+
+  div.innerHTML = html;
+  mainDiv.appendChild(div);
+
+  onValue(ref(db,"teams/"+g), snap=>{
+    const val = snap.val();
+    if(val && Array.isArray(val)) groups[g] = val;
+    fillSelects(g);
+    listenGroup(g);
+    if(isMaster) updateScorerForm();
+  });
+}
+
+// ====== وظائف الفرق ======
+function fillSelects(g){
+  const t1Sel = document.getElementById(`t1-${g}`);
+  const t2Sel = document.getElementById(`t2-${g}`);
+  if(!t1Sel) return;
+  t1Sel.innerHTML=""; t2Sel.innerHTML="";
+  groups[g].forEach(t=>{
+    t1Sel.add(new Option(t,t));
+    t2Sel.add(new Option(t,t));
+  });
+}
+
+window.inlineRename = async function(g, oldName){
+  if(!isMaster) return;
+  const newName = prompt("الاسم الجديد للفريق:", oldName);
+  if(!newName || newName.trim()==="" || newName===oldName) return;
+
+  await deleteTeamInline(g, oldName);
+
+  groups[g].push(newName);
+  await set(ref(db,"teams/"+g), groups[g]);
+}
+
+window.deleteTeamInline = async function(g, team){
+  if(!isMaster) return;
+  if(!confirm(`هل تريد حذف الفريق "${team}"؟`)) return;
+
+  groups[g] = groups[g].filter(t=>t!==team);
+  await set(ref(db,"teams/"+g), groups[g]);
+
+  const snap = await get(ref(db,"matches/"+g));
+  const data = snap.val() || {};
+  for(const k in data){
+    const m = data[k];
+    if(m.t1===team || m.t2===team) await set(ref(db,"matches/"+g+"/"+k), null);
+  }
+}
+
+window.addTeam = async function(g){
+  const name = prompt("ادخل اسم الفريق الجديد:");
+  if(!name || name.trim()==="") return;
+  groups[g].push(name);
+  await set(ref(db,"teams/"+g), groups[g]);
+}
+
+// ====== إدارة المباريات ======
+window.addMatch = function(g){
+  const t1 = document.getElementById(`t1-${g}`).value;
+  const t2 = document.getElementById(`t2-${g}`).value;
+  const s1 = parseInt(document.getElementById(`s1-${g}`).value)||0;
+  const s2 = parseInt(document.getElementById(`s2-${g}`).value)||0;
+  if(t1===t2) return alert("اختار فريقين مختلفين");
+  push(ref(db,"matches/"+g),{t1,t2,s1,s2,time:Date.now()});
+}
+
+window.editMatch = function(g,k){
+  const s1 = prompt("هدف الفريق الأول");
+  const s2 = prompt("هدف الفريق الثاني");
+  if(s1===null||s2===null) return;
+  set(ref(db,"matches/"+g+"/"+k+"/s1"), parseInt(s1)||0);
+  set(ref(db,"matches/"+g+"/"+k+"/s2"), parseInt(s2)||0);
+  set(ref(db,"matches/"+g+"/"+k+"/time"), Date.now());
+}
+
+window.delMatch = function(g,k){
+  if(confirm("حذف؟")) set(ref(db,"matches/"+g+"/"+k), null);
+}
+
+function listenGroup(g){
+  onValue(ref(db,"matches/"+g), snap=>{
+    const data = snap.val()||{};
+    const teamsObj={};
+    groups[g].forEach(t=>teamsObj[t]={name:t,p:0,w:0,d:0,l:0,gf:0,ga:0,gd:0,pts:0});
+
+    for(const k in data){
+      const m = data[k];
+      const a = teamsObj[m.t1], b = teamsObj[m.t2];
+      if(!a||!b) continue;
+      a.p++; b.p++;
+      a.gf+=m.s1; a.ga+=m.s2;
+      b.gf+=m.s2; b.ga+=m.s1;
+      if(m.s1>m.s2){a.w++;a.pts+=3;b.l++;}
+      else if(m.s2>m.s1){b.w++;b.pts+=3;a.l++;}
+      else{a.d++;b.d++;a.pts++;b.pts++;}
+    }
+
+    Object.values(teamsObj).forEach(x=>x.gd=x.gf-x.ga);
+    const sorted = Object.values(teamsObj).sort((a,b)=>b.pts-a.pts || b.gd-a.gd || b.gf-a.gf);
+
+    const table = document.querySelector(`#table-${g} tbody`);
+    const matches = document.querySelector(`#matches-${g} tbody`);
+    table.innerHTML=""; matches.innerHTML="";
+
+    sorted.forEach(d=>{
+      const clickable = isMaster ?
+        `<td class="team-editable" onclick="inlineRename('${g}','${d.name}')">
+           ${d.name} 
+           <button style="margin-left:4px;" onclick="deleteTeamInline('${g}','${d.name}');event.stopPropagation();">حذف</button>
+         </td>` :
+        `<td>${d.name}</td>`;
+
+      table.innerHTML += `<tr>
+        ${clickable}
+        <td>${d.p}</td><td>${d.w}</td><td>${d.d}</td><td>${d.l}</td>
+        <td>${d.gf}</td><td>${d.ga}</td><td>${d.gd}</td><td>${d.pts}</td>
+      </tr>`;
+    });
+
+    for(const k in data){
+      const m = data[k];
+      const editDel = isMaster?`
+        <td><button onclick="editMatch('${g}','${k}')">تعديل</button></td>
+        <td><button onclick="delMatch('${g}','${k}')">حذف</button></td>`:"";
+
+      matches.innerHTML += `<tr>
+        <td>${m.t1}</td><td>${m.s1}</td>
+        <td>${m.t2}</td><td>${m.s2}</td>
+        ${editDel}
+      </tr>`;
+    }
+  });
+}
+
+// ====== إدارة الهدافين ======
+function updateScorerForm(){
+  if(!isMaster) return;
+  actionsHeader.innerHTML = "إجراءات";
+  addScorerDiv.innerHTML = `
+    <input type="text" id="scorerName" placeholder="اسم اللاعب">
+    <select id="scorerTeam"></select>
+    <input type="number" id="scorerGoals" placeholder="عدد الأهداف" min="1">
+    <button onclick="addScorer()">إضافة هداف</button>
+  `;
+  const sel = document.getElementById("scorerTeam");
+  sel.innerHTML="";
+  for(const g of ["A","B","E","F"]){
+    groups[g].forEach(t=>sel.add(new Option(t,t)));
+  }
+}
+
+window.addScorer = function(){
+  const name = document.getElementById("scorerName").value.trim();
+  const team = document.getElementById("scorerTeam").value;
+  const goals = parseInt(document.getElementById("scorerGoals").value)||0;
+  if(!name || !team || goals<=0) return alert("ادخل كل البيانات بشكل صحيح");
+  push(ref(db,"scorers"),{name,team,goals});
+  document.getElementById("scorerName").value="";
+  document.getElementById("scorerGoals").value="";
+}
+
+// تعديل وحذف الهدافين
+function editScorer(key,data){
+  if(!isMaster) return;
+  const name = prompt("اسم اللاعب:", data.name);
+  if(!name) return;
+  const goals = prompt("عدد الأهداف:", data.goals);
+  if(goals===null) return;
+  const team = prompt("الفريق:", data.team);
+  if(!team) return;
+  set(ref(db,"scorers/"+key), {name, team, goals:parseInt(goals)||0});
+}
+
+function delScorer(key){
+  if(!isMaster) return;
+  if(confirm("حذف هذا الهداف؟")) remove(ref(db,"scorers/"+key));
+}
+
+// الاستماع للهدافين وتحديث الجدول مباشرة
+onValue(ref(db,"scorers"), snap=>{
+  const data = snap.val() || {};
+  const tbody = document.querySelector("#scorersTable tbody");
+  tbody.innerHTML="";
+  const list=[];
+  for(const k in data) list.push({...data[k], key:k});
+  list.sort((a,b)=>b.goals-a.goals).forEach(d=>{
+    const actions = isMaster?`
+      <td>
+        <button onclick="editScorer('${d.key}',${JSON.stringify(d)})">تعديل</button>
+        <button onclick="delScorer('${d.key}')">حذف</button>
+      </td>`:"";
+    tbody.innerHTML+=`<tr>
+      <td>${d.name}</td><td>${d.team}</td><td>${d.goals}</td>
+      ${actions}
+    </tr>`;
+  });
+});
+
+if(isMaster) updateScorerForm();
+</script>
+</body>
+</html>
